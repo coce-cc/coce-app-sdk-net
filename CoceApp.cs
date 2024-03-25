@@ -1,14 +1,13 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SimApi.Communications;
 using SimApi.Helpers;
 
 namespace CoceAppSdk;
 
-public class CoceApp(CoceAppSdkOption option, ILogger<CoceApp> logger, IServiceProvider sp)
+public class CoceApp(CoceAppSdkOption option, ILogger<CoceApp> logger)
 {
     /// <summary>
     /// 获取Level Token
