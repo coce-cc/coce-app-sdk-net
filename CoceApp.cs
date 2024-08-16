@@ -17,7 +17,6 @@ public class CoceApp(CoceAppSdkOption option, ILogger<CoceApp> logger)
     /// <returns></returns>
     public LevelTokenResponse? GetLevelToken(string lv1Token, int level = 5)
     {
-        var platUrl = option.ApiEndpoint + "/api/app/token";
         var dict = new Dictionary<string, object>
         {
             { "lv1Token", lv1Token },
@@ -25,23 +24,145 @@ public class CoceApp(CoceAppSdkOption option, ILogger<CoceApp> logger)
             { "appId", option.AppId! },
             { "level", level }
         };
-        var sorted = dict.OrderBy(x => x.Key);
+        return QueryAppApi<LevelTokenResponse>("/api/app/token", dict);
+    }
+
+    /// <summary>
+    /// 通过用户手机号搜索用户
+    /// </summary>
+    /// <param name="phone"></param>
+    /// <returns></returns>
+    public UserInfo? SearchUserByPhone(string phone)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "cell", phone },
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+        };
+        return QueryAppApi<UserInfo>("/api/app/user/search-by-phone", dict);
+    }
+
+    /// <summary>
+    /// 通过给出的UserId列表获取用户信息
+    /// </summary>
+    /// <param name="userIds"></param>
+    /// <returns></returns>
+    public UserInfo[]? SearchUserByIds(IEnumerable<string> userIds)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "ids", string.Join(",", userIds) },
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+        };
+        return QueryAppApi<UserInfo[]>("/api/app/user/search-by-ids", dict);
+    }
+
+    /// <summary>
+    /// 向用户发送消息
+    /// </summary>
+    /// <param name="userId"></param>
+    /// <param name="title"></param>
+    /// <param name="content"></param>
+    /// <returns></returns>
+    public bool SendUserMessage(string userId, string title, string content)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+            { "userId", userId },
+            { "type", "text" },
+            { "title", title },
+            { "text", content }
+        };
+        return QueryAppApiNoResp("/api/app/message", dict);
+    }
+
+    /// <summary>
+    /// 创建交易订单号
+    /// </summary>
+    /// <param name="name"></param>
+    /// <param name="amount"></param>
+    /// <param name="ext"></param>
+    /// <returns></returns>
+    public string? TradeCreate(string name, int amount, string ext)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+            { "amount", amount },
+            { "ext", ext },
+            { "name", name }
+        };
+        return QueryAppApi<string>("/api/app/trade/create", dict);
+    }
+
+    /// <summary>
+    /// 查询订单状态
+    /// </summary>
+    /// <param name="tradeNo"></param>
+    /// <returns></returns>
+    public CheckTradeResponse? TradeCheck(string tradeNo)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+            { "tradeNo", tradeNo }
+        };
+        return QueryAppApi<CheckTradeResponse>("/api/app/trade/result", dict);
+    }
+    
+    /// <summary>
+    /// 对订单进行退款
+    /// </summary>
+    /// <param name="tradeNo"></param>
+    /// <returns></returns>
+    public bool TradeRefund(string tradeNo)
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "time", (int)SimApiUtil.TimestampNow },
+            { "appId", option.AppId! },
+            { "tradeNo", tradeNo }
+        };
+        return QueryAppApiNoResp("/api/app/trade/refund", dict);
+    }
+
+
+    private T? QueryAppApi<T>(string endpoint, Dictionary<string, object> request)
+    {
+        var response = QueryAppApi(endpoint, request);
+        var result = response!.Content.ReadFromJsonAsync<SimApiBaseResponse<T>>().Result!;
+        if (result.Code == 200) return result.Data;
+        logger.LogDebug("发生错误: {Code} => {Message}", result.Code, result.Message);
+        return default;
+    }
+
+    private bool QueryAppApiNoResp(string endpoint, Dictionary<string, object> request)
+    {
+        var response = QueryAppApi(endpoint, request);
+        var result = response!.Content.ReadFromJsonAsync<SimApiBaseResponse>().Result!;
+        return result.Code == 200;
+    }
+
+    private HttpResponseMessage? QueryAppApi(string endpoint, Dictionary<string, object> request)
+    {
+        var platUrl = option.ApiEndpoint + endpoint;
+        var sorted = request.OrderBy(x => x.Key);
         var signStr = sorted.Aggregate("", (current, item) => current + $"{item.Key}={item.Value}&").TrimEnd('&');
         logger.LogDebug("签名的字符串: {SignStr}", signStr);
         var sign = SimApiUtil.Md5(signStr + option.AppKey);
         logger.LogDebug("签名: {Sign}", sign);
+        request.Add("sign", sign);
+        logger.LogDebug("请求地址: {PlatUrl} => {Data}", platUrl, JsonSerializer.Serialize(request));
         var http = new HttpClient();
-        dict.Add("sign", sign);
-        logger.LogDebug("请求地址: {PlatUrl} => {Data}", platUrl, JsonSerializer.Serialize(dict));
-        var response = http.PostAsJsonAsync(platUrl, dict).Result;
-        var result = response.Content.ReadFromJsonAsync<SimApiBaseResponse<LevelTokenResponse>>().Result!;
-        if (result.Code != 200)
-        {
-            logger.LogDebug("发生错误: {Code} => {Message}", result.Code, result.Message);
-            return null;
-        }
-        return result.Data;
+        return http.PostAsJsonAsync(platUrl, request).Result;
     }
+
 
     /// <summary>
     /// 获取用户的群组信息
@@ -87,6 +208,7 @@ public class CoceApp(CoceAppSdkOption option, ILogger<CoceApp> logger)
         {
             logger.LogDebug("请求发生错误: {RespCode} => {RespMessage}", resp.Code, resp.Message);
         }
+
         return resp.Code == 200 ? resp.Data : default;
     }
 
@@ -103,3 +225,15 @@ public record LevelTokenResponse(string Token, string UserId, int TokenLevel);
 public record GroupInfo(string Id, string Name, string Image, string Description, string Role);
 
 public record UserInfo(string UserId, string Name, string Image);
+
+public record CheckTradeResponse(
+    string TradeNo,
+    int Amount,
+    int Fee,
+    string Name,
+    string? Ext,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? FinishedAt,
+    DateTime? RefundAt,
+    DateTime? CloseAt);
